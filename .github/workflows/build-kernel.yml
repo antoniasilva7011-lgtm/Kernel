@@ -1,12 +1,10 @@
-name: Build A52Q RisingOS 14 KernelSU
+name: Build A52Q Ascendia 14 KernelSU
 
 on:
   workflow_dispatch:
   push:
     paths:
       - ".github/workflows/build-kernel.yml"
-      - "anykernel/**"
-      - "README.md"
 
 jobs:
   build:
@@ -22,166 +20,108 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential ccache curl flex git libssl-dev libelf-dev \
-            libncurses-dev lz4 python3 rsync unzip zip zstd \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+            libncurses-dev python3 rsync unzip zip zstd \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
-      - name: Clone RisingOS A52Q kernel source
+      - name: Clone official Ascendia AOSP KernelSU source
         run: |
-          git clone --depth=1 --branch rising-14 \
-            https://github.com/RisenID/kernel_samsung_sm7125.git kernel
+          git clone --depth=1 --recurse-submodules --shallow-submodules \
+            --branch ascendia-14-ksu-aosp \
+            https://github.com/RisenID/kernel_samsung_ascendia_sm7125.git kernel
           cd kernel
           echo "Kernel source commit:"
           git rev-parse HEAD
+          test -f arch/arm64/configs/vendor/a52q_eur_open_defconfig
+          test -e KernelSU
 
-      - name: Download matching AOSP clang r383902
+      - name: Download maintainer-matching AOSP clang r416183c2
         run: |
           mkdir toolchain
           cd toolchain
           git init
           git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
-          git fetch --depth=1 origin 0e9e7035bf8ad42437c6156e5950eab13655b26c
-          git checkout FETCH_HEAD -- clang-r383902
-          test -x clang-r383902/bin/clang
-          ./clang-r383902/bin/clang --version | head -n 2
+          git fetch --depth=1 origin 4625961de9653580dcc53a3117ce5e844d1be6c2
+          git checkout FETCH_HEAD -- clang-r416183c2
+          test -x clang-r416183c2/bin/clang
+          ./clang-r416183c2/bin/clang --version | head -n 2
 
-      - name: Integrate KernelSU v0.9.5
-        working-directory: kernel
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          test -d KernelSU
-          git -C KernelSU rev-parse HEAD
-          git -C KernelSU describe --tags --always
-
-      - name: Configure A52Q kernel
+      - name: Configure A52Q exactly like maintainer
         working-directory: kernel
         env:
-          TC: ${{ github.workspace }}/toolchain/clang-r383902
+          TC: ${{ github.workspace }}/toolchain/clang-r416183c2
         run: |
           export PATH="$TC/bin:$PATH"
-          mkdir -p out
+          export LD_LIBRARY_PATH="$TC/lib64:${LD_LIBRARY_PATH:-}"
+          rm -rf out
+          make ARCH=arm64 O=out vendor/a52q_eur_open_defconfig
+          test -s out/.config
+          echo "==== Identity / KSU config ===="
+          grep -E 'CONFIG_(LOCALVERSION|KSU|KPROBES|HAVE_KPROBES|OVERLAY_FS)=' out/.config || true
 
-          COMMON_ARGS=(
-            O=out
-            ARCH=arm64
-            CC=clang
-            AR=llvm-ar
-            NM=llvm-nm
-            LD=ld.lld
-            AS=llvm-as
-            STRIP=llvm-strip
-            OBJCOPY=llvm-objcopy
-            OBJDUMP=llvm-objdump
-            CLANG_TRIPLE=aarch64-linux-gnu-
-            CROSS_COMPILE=aarch64-linux-gnu-
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          )
-
-          make "${COMMON_ARGS[@]}" vendor/pixel_experience-a52q_defconfig
-
-          # KernelSU non-GKI 4.14: enable KSU and its kprobe requirements.
-          ./scripts/config --file out/.config -e KSU
-          ./scripts/config --file out/.config -e KPROBES
-          ./scripts/config --file out/.config -e KPROBE_EVENTS
-          ./scripts/config --file out/.config -e HAVE_KPROBES || true
-
-          make "${COMMON_ARGS[@]}" olddefconfig
-
-          echo "==== Required config ===="
-          grep -E 'CONFIG_(KSU|KPROBES|HAVE_KPROBES|KPROBE_EVENTS|OVERLAY_FS)=' out/.config
-
-          grep -q '^CONFIG_KSU=y' out/.config
-          grep -q '^CONFIG_KPROBES=y' out/.config
-          grep -q '^CONFIG_KPROBE_EVENTS=y' out/.config
-          grep -q '^CONFIG_OVERLAY_FS=y' out/.config
-
-      - name: Build kernel
+      - name: Build A52Q kernel exactly like maintainer script
         working-directory: kernel
         env:
-          TC: ${{ github.workspace }}/toolchain/clang-r383902
+          TC: ${{ github.workspace }}/toolchain/clang-r416183c2
         run: |
           export PATH="$TC/bin:$PATH"
-          COMMON_ARGS=(
-            O=out
-            ARCH=arm64
-            CC=clang
-            AR=llvm-ar
-            NM=llvm-nm
-            LD=ld.lld
-            AS=llvm-as
-            STRIP=llvm-strip
-            OBJCOPY=llvm-objcopy
-            OBJDUMP=llvm-objdump
-            CLANG_TRIPLE=aarch64-linux-gnu-
-            CROSS_COMPILE=aarch64-linux-gnu-
+          export LD_LIBRARY_PATH="$TC/lib64:${LD_LIBRARY_PATH:-}"
+          make -j"$(nproc)" O=out ARCH=arm64 \
+            CC="ccache clang" \
+            AR="llvm-ar" NM="llvm-nm" LD="ld.lld" AS="llvm-as" \
+            STRIP="llvm-strip" OBJCOPY="llvm-objcopy" OBJDUMP="llvm-objdump" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          )
 
-          make -j"$(nproc)" "${COMMON_ARGS[@]}"
-
+          test -s out/arch/arm64/boot/Image
           test -s out/arch/arm64/boot/Image.gz
-          ls -lh out/arch/arm64/boot/Image.gz
+          test -s out/arch/arm64/boot/dts/qcom/atoll-ab-idp.dtb
 
-      - name: Create TWRP AnyKernel3 package
+          ls -lh out/arch/arm64/boot/Image \
+                 out/arch/arm64/boot/Image.gz \
+                 out/arch/arm64/boot/dts/qcom/atoll-ab-idp.dtb
+
+      - name: Validate output before packaging
+        working-directory: kernel
         run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-          rm -rf AnyKernel3/.git AnyKernel3/.github
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, gzip
+          image = Path("out/arch/arm64/boot/Image")
+          image_gz = Path("out/arch/arm64/boot/Image.gz")
+          dtb = Path("out/arch/arm64/boot/dts/qcom/atoll-ab-idp.dtb")
+          assert image.stat().st_size > 40_000_000
+          assert image_gz.stat().st_size > 10_000_000
+          assert dtb.read_bytes()[:4] == bytes.fromhex("d00dfeed")
+          dec = gzip.decompress(image_gz.read_bytes())
+          assert dec == image.read_bytes()
+          for p in (image, image_gz, dtb):
+              print(p, p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
 
-          cp kernel/out/arch/arm64/boot/Image.gz AnyKernel3/
-
-          cat > AnyKernel3/anykernel.sh <<'AK3'
-          # AnyKernel3 Ramdisk Mod Script
-          properties() { '
-          kernel.string=A52Q RisingOS14 KernelSU 0.9.5
-          do.devicecheck=1
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=0
-          device.name1=a52q
-          device.name2=SM-A525F
-          device.name3=SM-A525M
-          supported.versions=14
-          supported.patchlevels=
-          '; }
-
-          BLOCK=boot;
-          IS_SLOT_DEVICE=0;
-          RAMDISK_COMPRESSION=auto;\n          PATCH_VBMETA_FLAG=auto;
-
-          . tools/ak3-core.sh;
-
-          dump_boot;
-
-          # Replace only the kernel while keeping the ROM's own boot ramdisk/header.
-          write_boot;
-          AK3
-
-          cd AnyKernel3
-          zip -r9 ../A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip . \
-            -x '.git/*' '.github/*' 'README.md'
-          cd ..
-
-          test -s A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip
-          ls -lh A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip
-
-      - name: Collect artifacts
+      - name: Collect NON-FLASHABLE build outputs
         run: |
           mkdir -p artifacts
+          cp kernel/out/arch/arm64/boot/Image artifacts/
           cp kernel/out/arch/arm64/boot/Image.gz artifacts/
+          cp kernel/out/arch/arm64/boot/dts/qcom/atoll-ab-idp.dtb artifacts/
           cp kernel/out/.config artifacts/kernel-config.txt
-          cp A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip artifacts/
-          printf '%s\n' \
-            "Device: Samsung Galaxy A52 4G (a52q)" \
-            "ROM base: RisingOS 5.2 Android 14" \
-            "Kernel source: RisenID/kernel_samsung_sm7125:rising-14" \
-            "KernelSU: v0.9.5 (non-GKI)" \
-            "Install: TWRP -> Install -> A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip" \
-            "Keep a Boot backup before flashing." > artifacts/BUILD-INFO.txt
+          {
+            echo "Device: Samsung Galaxy A52 4G (a52q)"
+            echo "ROM/kernel family: RisingOS 14 / Ascendia AOSP"
+            echo "Source: RisenID/kernel_samsung_ascendia_sm7125"
+            echo "Branch: ascendia-14-ksu-aosp"
+            echo "Defconfig: vendor/a52q_eur_open_defconfig"
+            echo "Toolchain: AOSP clang-r416183c2"
+            echo "IMPORTANT: these files are NOT flashable directly."
+            echo "They must be repacked into the user's known-good boot image after structural comparison."
+          } > artifacts/BUILD-INFO.txt
 
-      - name: Upload kernel artifacts
+      - name: Upload validated raw artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A52Q-RisingOS14-KernelSU
+          name: A52Q-Ascendia14-KSU-RAW
           path: artifacts/*
           if-no-files-found: error
           retention-days: 30
