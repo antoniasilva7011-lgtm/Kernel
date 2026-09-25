@@ -22,7 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential ccache curl flex git libssl-dev libelf-dev \
-            libncurses-dev lz4 python3 rsync unzip zip zstd
+            libncurses-dev lz4 python3 rsync unzip zip zstd \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
       - name: Clone RisingOS A52Q kernel source
         run: |
