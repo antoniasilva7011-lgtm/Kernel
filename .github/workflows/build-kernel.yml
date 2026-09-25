@@ -40,8 +40,14 @@ jobs:
           echo "Pinned KernelSU commit: $KSU_SHA"
           test -n "$KSU_SHA"
           rm -rf KernelSU
-          git clone https://github.com/ananjaser1211/KernelSU.git KernelSU
-          git -C KernelSU checkout "$KSU_SHA"
+          mkdir KernelSU
+          git -C KernelSU init
+          git -C KernelSU remote add origin https://github.com/ananjaser1211/KernelSU.git
+          # Fetch the exact historical commit explicitly. A normal clone follows
+          # the current default branch and may omit this no-longer-reachable tree.
+          git -C KernelSU fetch origin "$KSU_SHA"
+          git -C KernelSU checkout --detach FETCH_HEAD
+          test "$(git -C KernelSU rev-parse HEAD)" = "$KSU_SHA"
 
           KSU_COUNT=$(git -C KernelSU rev-list --count HEAD)
           KSU_VERSION=$((10000 + KSU_COUNT + 200))
