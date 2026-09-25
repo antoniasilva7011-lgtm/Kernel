@@ -32,16 +32,16 @@ jobs:
           echo "Kernel source commit:"
           git rev-parse HEAD
 
-      - name: Download AOSP clang r487747c
+      - name: Download matching AOSP clang r383902
         run: |
-          git clone --filter=blob:none --no-checkout \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain
+          mkdir toolchain
           cd toolchain
-          git sparse-checkout init --cone
-          git sparse-checkout set clang-r487747c
-          git checkout master
-          test -x clang-r487747c/bin/clang
-          ./clang-r487747c/bin/clang --version | head -n 2
+          git init
+          git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+          git fetch --depth=1 origin 0e9e7035bf8ad42437c6156e5950eab13655b26c
+          git checkout FETCH_HEAD -- clang-r383902
+          test -x clang-r383902/bin/clang
+          ./clang-r383902/bin/clang --version | head -n 2
 
       - name: Integrate KernelSU v0.9.5
         working-directory: kernel
@@ -54,7 +54,7 @@ jobs:
       - name: Configure A52Q kernel
         working-directory: kernel
         env:
-          TC: ${{ github.workspace }}/toolchain/clang-r487747c
+          TC: ${{ github.workspace }}/toolchain/clang-r383902
         run: |
           export PATH="$TC/bin:$PATH"
           mkdir -p out
@@ -96,7 +96,7 @@ jobs:
       - name: Build kernel
         working-directory: kernel
         env:
-          TC: ${{ github.workspace }}/toolchain/clang-r487747c
+          TC: ${{ github.workspace }}/toolchain/clang-r383902
         run: |
           export PATH="$TC/bin:$PATH"
           COMMON_ARGS=(
