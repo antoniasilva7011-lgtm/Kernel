@@ -144,9 +144,9 @@ jobs:
           supported.patchlevels=
           '; }
 
-          BLOCK=/dev/block/bootdevice/by-name/boot;
+          BLOCK=boot;
           IS_SLOT_DEVICE=0;
-          RAMDISK_COMPRESSION=auto;
+          RAMDISK_COMPRESSION=auto;\n          PATCH_VBMETA_FLAG=auto;
 
           . tools/ak3-core.sh;
 
