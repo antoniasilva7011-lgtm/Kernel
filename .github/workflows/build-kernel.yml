@@ -118,15 +118,15 @@ jobs:
 
           make -j"$(nproc)" "${COMMON_ARGS[@]}"
 
-          test -s out/arch/arm64/boot/Image.gz-dtb
-          ls -lh out/arch/arm64/boot/Image.gz-dtb
+          test -s out/arch/arm64/boot/Image.gz
+          ls -lh out/arch/arm64/boot/Image.gz
 
       - name: Create TWRP AnyKernel3 package
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github
 
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          cp kernel/out/arch/arm64/boot/Image.gz AnyKernel3/
 
           cat > AnyKernel3/anykernel.sh <<'AK3'
           # AnyKernel3 Ramdisk Mod Script
@@ -167,7 +167,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb artifacts/
+          cp kernel/out/arch/arm64/boot/Image.gz artifacts/
           cp kernel/out/.config artifacts/kernel-config.txt
           cp A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip artifacts/
           printf '%s\n' \
