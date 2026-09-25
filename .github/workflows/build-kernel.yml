@@ -1,0 +1,186 @@
+name: Build A52Q RisingOS 14 KernelSU
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-kernel.yml"
+      - "anykernel/**"
+      - "README.md"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex git libssl-dev libelf-dev \
+            libncurses-dev lz4 python3 rsync unzip zip zstd
+
+      - name: Clone RisingOS A52Q kernel source
+        run: |
+          git clone --depth=1 --branch rising-14 \
+            https://github.com/RisenID/kernel_samsung_sm7125.git kernel
+          cd kernel
+          echo "Kernel source commit:"
+          git rev-parse HEAD
+
+      - name: Download AOSP clang r487747c
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchain
+          cd toolchain
+          git sparse-checkout init --cone
+          git sparse-checkout set clang-r487747c
+          git checkout master
+          test -x clang-r487747c/bin/clang
+          ./clang-r487747c/bin/clang --version | head -n 2
+
+      - name: Integrate KernelSU v0.9.5
+        working-directory: kernel
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          test -d KernelSU
+          git -C KernelSU rev-parse HEAD
+          git -C KernelSU describe --tags --always
+
+      - name: Configure A52Q kernel
+        working-directory: kernel
+        env:
+          TC: ${{ github.workspace }}/toolchain/clang-r487747c
+        run: |
+          export PATH="$TC/bin:$PATH"
+          mkdir -p out
+
+          COMMON_ARGS=(
+            O=out
+            ARCH=arm64
+            CC=clang
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            AS=llvm-as
+            STRIP=llvm-strip
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          )
+
+          make "${COMMON_ARGS[@]}" vendor/pixel_experience-a52q_defconfig
+
+          # KernelSU non-GKI 4.14: enable KSU and its kprobe requirements.
+          ./scripts/config --file out/.config -e KSU
+          ./scripts/config --file out/.config -e KPROBES
+          ./scripts/config --file out/.config -e KPROBE_EVENTS
+          ./scripts/config --file out/.config -e HAVE_KPROBES || true
+
+          make "${COMMON_ARGS[@]}" olddefconfig
+
+          echo "==== Required config ===="
+          grep -E 'CONFIG_(KSU|KPROBES|HAVE_KPROBES|KPROBE_EVENTS|OVERLAY_FS)=' out/.config
+
+          grep -q '^CONFIG_KSU=y' out/.config
+          grep -q '^CONFIG_KPROBES=y' out/.config
+          grep -q '^CONFIG_KPROBE_EVENTS=y' out/.config
+          grep -q '^CONFIG_OVERLAY_FS=y' out/.config
+
+      - name: Build kernel
+        working-directory: kernel
+        env:
+          TC: ${{ github.workspace }}/toolchain/clang-r487747c
+        run: |
+          export PATH="$TC/bin:$PATH"
+          COMMON_ARGS=(
+            O=out
+            ARCH=arm64
+            CC=clang
+            AR=llvm-ar
+            NM=llvm-nm
+            LD=ld.lld
+            AS=llvm-as
+            STRIP=llvm-strip
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          )
+
+          make -j"$(nproc)" "${COMMON_ARGS[@]}"
+
+          test -s out/arch/arm64/boot/Image.gz-dtb
+          ls -lh out/arch/arm64/boot/Image.gz-dtb
+
+      - name: Create TWRP AnyKernel3 package
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/.github
+
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+
+          cat > AnyKernel3/anykernel.sh <<'AK3'
+          # AnyKernel3 Ramdisk Mod Script
+          properties() { '
+          kernel.string=A52Q RisingOS14 KernelSU 0.9.5
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=a52q
+          device.name2=SM-A525F
+          device.name3=SM-A525M
+          supported.versions=14
+          supported.patchlevels=
+          '; }
+
+          block=/dev/block/by-name/boot;
+          is_slot_device=0;
+          ramdisk_compression=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+
+          # Replace only the kernel while keeping the ROM's own boot ramdisk/header.
+          write_boot;
+          AK3
+
+          cd AnyKernel3
+          zip -r9 ../A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip . \
+            -x '.git/*' '.github/*' 'README.md'
+          cd ..
+
+          test -s A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip
+          ls -lh A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb artifacts/
+          cp kernel/out/.config artifacts/kernel-config.txt
+          cp A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip artifacts/
+          printf '%s\n' \
+            "Device: Samsung Galaxy A52 4G (a52q)" \
+            "ROM base: RisingOS 5.2 Android 14" \
+            "Kernel source: RisenID/kernel_samsung_sm7125:rising-14" \
+            "KernelSU: v0.9.5 (non-GKI)" \
+            "Install: TWRP -> Install -> A52Q-RisingOS14-KSU-0.9.5-AnyKernel3.zip" \
+            "Keep a Boot backup before flashing." > artifacts/BUILD-INFO.txt
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: A52Q-RisingOS14-KernelSU
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
