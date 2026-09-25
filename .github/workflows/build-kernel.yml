@@ -35,6 +35,15 @@ jobs:
           test -f arch/arm64/configs/vendor/a52q_eur_open_defconfig
           test -e KernelSU
 
+          # Important: KernelSU derives KSU_VERSION from git rev-list count.
+          # A shallow submodule reports 10201 (10000 + 1 + 200), which is too old
+          # for the v1.0.1 manager even though the source code itself is v1.0.1.
+          git -C KernelSU fetch --unshallow || true
+          echo "KernelSU commit count:"
+          git -C KernelSU rev-list --count HEAD
+          echo "Expected KSU_VERSION:"
+          echo $((10000 + $(git -C KernelSU rev-list --count HEAD) + 200))
+
       - name: Download maintainer-matching AOSP clang r416183c2
         run: |
           mkdir toolchain
@@ -58,6 +67,11 @@ jobs:
           test -s out/.config
           echo "==== Identity / KSU config ===="
           grep -E 'CONFIG_(LOCALVERSION|KSU|KPROBES|HAVE_KPROBES|OVERLAY_FS)=' out/.config || true
+
+          KSU_COUNT=$(git -C KernelSU rev-list --count HEAD)
+          KSU_VERSION=$((10000 + KSU_COUNT + 200))
+          echo "KSU_VERSION=$KSU_VERSION"
+          test "$KSU_VERSION" -ge 11071
 
       - name: Build A52Q kernel exactly like maintainer script
         working-directory: kernel
